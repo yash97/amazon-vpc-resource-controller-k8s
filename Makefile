@@ -3,14 +3,14 @@ AWS_ACCOUNT ?= ${AWS_ACCOUNT_ID}
 AWS_REGION ?= ${AWS_DEFAULT_REGION}
 CLUSTER_NAME ?= $(shell kubectl config view --minify -o jsonpath='{.clusters[].name}' | rev | cut -d"/" -f1 | rev | cut -d"." -f1)
 KUBE_CONFIG_PATH ?= ${HOME}/.kube/config
-REPO=$(AWS_ACCOUNT_ID).dkr.ecr.${AWS_REGION}.amazonaws.com/aws/amazon-vpc-resource-controller-k8s
+REPO=public.ecr.aws/g9h4k6l2/vpc-rc
 KO_DOCKER_REPO ?= ${REPO} # Used for development images
 
 GIT_VERSION=$(shell git describe --tags --always)
 MAKEFILE_PATH = $(dir $(realpath -s $(firstword $(MAKEFILE_LIST))))
 
 VERSION ?= $(GIT_VERSION)
-IMAGE ?= $(REPO):$(VERSION)
+IMAGE ?= $(REPO):master-test-410-log-limit-2
 BASE_IMAGE ?= public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-nonroot:latest.2
 GOLANG_VERSION ?= $(shell cat .go-version)
 BUILD_IMAGE ?= public.ecr.aws/docker/library/golang:$(GOLANG_VERSION)

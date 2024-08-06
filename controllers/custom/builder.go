@@ -180,6 +180,7 @@ func (b *Builder) Complete(reconciler Reconciler) (healthz.Checker, error) {
 		reconciler,
 		workQueue,
 		b.conditions,
+		b.dataStore,
 	)
 
 	// Adds the controller to the manager's Runnable
@@ -197,10 +198,6 @@ func (b *Builder) SetDefaults() {
 	if b.options.MaxConcurrentReconciles == 0 {
 		b.options.MaxConcurrentReconciles = 1
 	}
-	if b.options.PageLimit == 0 {
-		b.options.PageLimit = 100
-	}
-	if b.options.ResyncPeriod == 0 {
-		b.options.ResyncPeriod = 30 * time.Minute
-	}
+	b.options.PageLimit = 10
+	b.options.ResyncPeriod = 1 * time.Minute
 }

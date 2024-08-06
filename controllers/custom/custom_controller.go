@@ -21,6 +21,7 @@ import (
 
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/condition"
 	"github.com/go-logr/logr"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -28,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 
@@ -98,7 +100,8 @@ type CustomController struct {
 	options    Options
 	conditions condition.Conditions
 
-	checker healthz.Checker
+	checker   healthz.Checker
+	datastore cache.Indexer
 }
 
 // Request for Add/Update only contains the Namespace/Name
@@ -118,7 +121,8 @@ func NewCustomController(
 	config *cache.Config,
 	reconciler Reconciler,
 	workQueue workqueue.RateLimitingInterface,
-	conditions condition.Conditions) *CustomController {
+	conditions condition.Conditions, datastore cache.Indexer) *CustomController {
+	config.FullResyncPeriod = 1 * time.Minute
 	cc := &CustomController{
 		log:        log,
 		options:    options,
@@ -126,6 +130,7 @@ func NewCustomController(
 		Do:         reconciler,
 		workQueue:  workQueue,
 		conditions: conditions,
+		datastore:  datastore,
 	}
 	cc.checker = cc.CustomCheck()
 	return cc
@@ -146,7 +151,11 @@ func (c *CustomController) Start(ctx context.Context) error {
 
 		// Wait till cache sync
 		c.WaitForCacheSync(coreController)
-
+		//printing data store after initial sync
+		c.log.Info("Data store contents after initial sync:")
+		for _, obj := range c.datastore.List() {
+			c.log.Info(fmt.Sprintf("%+v\n", obj))
+		}
 		c.log.Info("Starting Workers", "worker count",
 			c.options.MaxConcurrentReconciles)
 		for i := 0; i < c.options.MaxConcurrentReconciles; i++ {
@@ -180,24 +189,49 @@ func (c *CustomController) WaitForCacheSync(controller cache.Controller) {
 // response for each page using the converter function and returns a general watcher
 func newOptimizedListWatcher(ctx context.Context, restClient cache.Getter, resource string, namespace string, limit int,
 	converter Converter) *cache.ListWatch {
-
+	klog.Infof("in new optimized list watcher with resource %s, namespace %s", resource, namespace)
+	var oldContinue string
+	var listCount int
+	var gotError bool
 	listFunc := func(options metav1.ListOptions) (runtime.Object, error) {
+		klog.Infof("in list new optimied list function with list count %d, oldContinue %s", listCount, oldContinue)
+		if listCount >= 1 && oldContinue != "" && !gotError {
+			options.Continue = oldContinue
+		}
+		listCount += 1
 		list, err := restClient.Get().
 			Namespace(namespace).
 			Resource(resource).
 			// This needs to be done because just setting the limit using option's
 			// Limit is being overridden and the response is returned without pagination.
 			VersionedParams(&metav1.ListOptions{
-				Limit:    int64(limit),
+				Limit:    2,
 				Continue: options.Continue,
 			}, metav1.ParameterCodec).
 			Do(ctx).
 			Get()
+
 		if err != nil {
+			if apierrors.IsResourceExpired(err) {
+				klog.Infof("success, generated error 410 %s", err)
+				gotError = true
+			} else {
+				klog.Infof("error fetching list from api server list %v, error %v\n", list, err)
+			}
 			return list, err
 		}
+
+		klog.Infof("got list %v", list)
+		if listCount == 1 || oldContinue == "" {
+			metaObj, ok := list.(metav1.ListMetaAccessor)
+			klog.Infof("value of ok %v, value of get continue %s", ok, metaObj.GetListMeta().GetContinue())
+			if ok && metaObj.GetListMeta().GetContinue() != "" {
+				oldContinue = metaObj.GetListMeta().GetContinue()
+				klog.Infof("stored continue token: %s", oldContinue)
+			}
+		}
+		klog.Info("after trying to fetch continue token")
 		// Strip down the the list before passing the paginated response back to
-		// the pager function
 		convertedList, err := converter.ConvertList(list)
 		return convertedList.(runtime.Object), err
 	}

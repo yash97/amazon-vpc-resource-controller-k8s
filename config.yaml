@@ -1,0 +1,5 @@
+clusterName: yash-dev-eks
+ataplane:
+    instanceCount: 2
+    instanceType: c5.large
+
