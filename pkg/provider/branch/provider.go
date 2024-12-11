@@ -31,7 +31,6 @@ import (
 	rcHealthz "github.com/aws/amazon-vpc-resource-controller-k8s/pkg/healthz"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/pool"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/provider"
-	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/provider/branch/cooldown"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/provider/branch/trunk"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/utils"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/worker"
@@ -78,7 +77,7 @@ var (
 		[]string{operationLabel, resourceCountLabel},
 	)
 
-	deleteQueueRequeueRequest = ctrl.Result{RequeueAfter: time.Second * 30, Requeue: true}
+	deleteQueueRequeueRequest = ctrl.Result{RequeueAfter: time.Second * 5, Requeue: true}
 
 	// NodeDeleteRequeueRequestDelay represents the time after which the resources belonging to a node will be cleaned
 	// up after receiving the actual node delete event.
@@ -359,7 +358,7 @@ func (b *branchENIProvider) CreateAndAnnotateResources(podNamespace string, podN
 	branchENIs, err := trunkENI.CreateAndAssociateBranchENIs(pod, securityGroups, resourceCount)
 	if err != nil {
 		if err == trunk.ErrCurrentlyAtMaxCapacity {
-			return ctrl.Result{RequeueAfter: cooldown.GetCoolDown().GetCoolDownPeriod(), Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: 5 * time.Second, Requeue: true}, nil
 		}
 		b.apiWrapper.K8sAPI.BroadcastEvent(pod, ReasonBranchAllocationFailed,
 			fmt.Sprintf("failed to allocate branch ENI to pod: %v", err), v1.EventTypeWarning)

@@ -45,6 +45,7 @@ type Manager interface {
 	DeleteAllPodsForcefully(context context.Context, podLabelKey string, podLabelVal string) error
 	GetENIDetailsFromPodAnnotation(podAnnotation map[string]string) ([]*trunk.ENIDetails, error)
 	GetPodsWithLabel(context context.Context, namespace string, labelKey string, labelValue string) ([]v1.Pod, error)
+	GetPodEvents(context context.Context, name string, namespace string) ([]v1.Event, error)
 	PatchPod(context context.Context, oldPod *v1.Pod, newPod *v1.Pod) error
 	PodExec(namespace string, name string, command []string) (string, string, error)
 }
@@ -243,4 +244,25 @@ func (d *defaultManager) getRestClientForPod(namespace string, name string) (res
 		return nil, err
 	}
 	return apiutil.RESTClientForGVK(gkv, false, d.config, serializer.NewCodecFactory(d.k8sSchema), client)
+}
+
+func (d *defaultManager) GetPodEvents(ctx context.Context, podName string, namespace string) ([]v1.Event, error) {
+	// Define a list of events
+	eventList := &v1.EventList{}
+
+	// List all events in the namespace
+	err := d.k8sClient.List(ctx, eventList, &client.ListOptions{Namespace: namespace})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list events for namespace %s: %w", namespace, err)
+	}
+
+	// Filter events for the specific pod
+	var podEvents []v1.Event
+	for _, event := range eventList.Items {
+		if event.InvolvedObject.Kind == "Pod" && event.InvolvedObject.Name == podName {
+			podEvents = append(podEvents, event)
+		}
+	}
+
+	return podEvents, nil
 }
