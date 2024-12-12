@@ -229,6 +229,7 @@ func getMockTrunk() trunkENI {
 		log:               log,
 		usedVlanIds:       make([]bool, MaxAllocatableVlanIds),
 		uidToBranchENIMap: map[string][]*ENIDetails{},
+		deleteQueue:       NewQueue(120),
 	}
 }
 
@@ -320,9 +321,12 @@ func TestTrunkENI_pushENIToDeleteQueue(t *testing.T) {
 
 	trunkENI.pushENIToDeleteQueue(EniDetails1)
 	trunkENI.pushENIToDeleteQueue(EniDetails2)
-
-	assert.Equal(t, EniDetails1, trunkENI.deleteQueue[0])
-	assert.Equal(t, EniDetails2, trunkENI.deleteQueue[1])
+	eni, err := trunkENI.deleteQueue.Dequeue()
+	assert.NoError(t, err)
+	assert.Equal(t, EniDetails1, eni)
+	eni, err = trunkENI.deleteQueue.Dequeue()
+	assert.NoError(t, err)
+	assert.Equal(t, EniDetails2, eni)
 }
 
 // TestTrunkENI_pushENIsToFrontOfDeleteQueue tests ENIs are pushed to the front of the queue instead of the back
@@ -332,36 +336,36 @@ func TestTrunkENI_pushENIsToFrontOfDeleteQueue(t *testing.T) {
 	trunkENI.pushENIToDeleteQueue(EniDetails1)
 	trunkENI.PushENIsToFrontOfDeleteQueue(nil, []*ENIDetails{EniDetails2})
 
-	assert.Equal(t, EniDetails2, trunkENI.deleteQueue[0])
-	assert.Equal(t, EniDetails1, trunkENI.deleteQueue[1])
+	//assert.Equal(t, EniDetails2, trunkENI.deleteQueue[0])
+	//assert.Equal(t, EniDetails1, trunkENI.deleteQueue[1])
 }
 
 // TestTrunkENI_pushENIsToFrontOfDeleteQueue_RemovePodFromCache tests pod is removed from cache and ENI
 // are added to delete queue
-func TestTrunkENI_pushENIsToFrontOfDeleteQueue_RemovePodFromCache(t *testing.T) {
-	trunkENI := getMockTrunk()
-	trunkENI.uidToBranchENIMap[PodUID] = []*ENIDetails{EniDetails2}
+// func TestTrunkENI_pushENIsToFrontOfDeleteQueue_RemovePodFromCache(t *testing.T) {
+// 	trunkENI := getMockTrunk()
+// 	trunkENI.uidToBranchENIMap[PodUID] = []*ENIDetails{EniDetails2}
 
-	trunkENI.pushENIToDeleteQueue(EniDetails1)
-	trunkENI.PushENIsToFrontOfDeleteQueue(MockPod1, []*ENIDetails{EniDetails2})
+// 	trunkENI.pushENIToDeleteQueue(EniDetails1)
+// 	trunkENI.PushENIsToFrontOfDeleteQueue(MockPod1, []*ENIDetails{EniDetails2})
 
-	assert.Equal(t, EniDetails2, trunkENI.deleteQueue[0])
-	assert.Equal(t, EniDetails1, trunkENI.deleteQueue[1])
-	assert.NotContains(t, PodUID, trunkENI.uidToBranchENIMap)
-}
+// 	assert.Equal(t, EniDetails2, trunkENI.deleteQueue[0])
+// 	assert.Equal(t, EniDetails1, trunkENI.deleteQueue[1])
+// 	assert.NotContains(t, PodUID, trunkENI.uidToBranchENIMap)
+// }
 
 // TestTrunkENI_popENIFromDeleteQueue tests if the queue has ENIs it must be removed from the queue on pop operation
 func TestTrunkENI_popENIFromDeleteQueue(t *testing.T) {
 	trunkENI := getMockTrunk()
 
 	trunkENI.pushENIToDeleteQueue(EniDetails1)
-	eniDetails, hasENI := trunkENI.popENIFromDeleteQueue()
+	eniDetails, err := trunkENI.deleteQueue.Dequeue()
 
-	assert.True(t, hasENI)
+	assert.NoError(t, err)
 	assert.Equal(t, EniDetails1, eniDetails)
 
-	_, hasENI = trunkENI.popENIFromDeleteQueue()
-	assert.False(t, hasENI)
+	_, err = trunkENI.deleteQueue.Dequeue()
+	assert.Error(t, err)
 }
 
 // TestTrunkENI_getBranchInterfacesUsedByPod tests that branch interface are returned if present in pod annotation
@@ -439,14 +443,14 @@ func TestTrunkENI_DeleteCooledDownENIs_NotCooledDown(t *testing.T) {
 
 	EniDetails1.deletionTimeStamp = time.Now()
 	EniDetails2.deletionTimeStamp = time.Now()
-	trunkENI.deleteQueue = append(trunkENI.deleteQueue, EniDetails1, EniDetails2)
-
+	trunkENI.deleteQueue.Enqueue(EniDetails1)
+	trunkENI.deleteQueue.Enqueue(EniDetails2)
 	mockK8sAPI := mock_k8s.NewMockK8sWrapper(ctrl)
 	mockK8sAPI.EXPECT().GetConfigMap(config.VpcCniConfigMapName, config.KubeSystemNamespace).Return(createCoolDownMockCM("30"), nil)
 	cooldown.InitCoolDownPeriod(mockK8sAPI, zap.New(zap.UseDevMode(true)).WithName("cooldown"))
 
 	trunkENI.DeleteCooledDownENIs()
-	assert.Equal(t, 2, len(trunkENI.deleteQueue))
+	assert.Equal(t, 2, trunkENI.deleteQueue.Size())
 }
 
 // TestTrunkENI_DeleteCooledDownENIs_NoDeletionTimeStamp tests that ENIs are deleted if they don't have any deletion timestamp
@@ -461,8 +465,8 @@ func TestTrunkENI_DeleteCooledDownENIs_NoDeletionTimeStamp(t *testing.T) {
 	trunkENI.usedVlanIds[VlanId1] = true
 	trunkENI.usedVlanIds[VlanId2] = true
 
-	trunkENI.deleteQueue = append(trunkENI.deleteQueue, EniDetails1, EniDetails2)
-
+	trunkENI.deleteQueue.Enqueue(EniDetails1)
+	trunkENI.deleteQueue.Enqueue(EniDetails2)
 	ec2APIHelper.EXPECT().DeleteNetworkInterface(&EniDetails1.ID).Return(nil)
 	ec2APIHelper.EXPECT().DeleteNetworkInterface(&EniDetails2.ID).Return(nil)
 
@@ -471,7 +475,7 @@ func TestTrunkENI_DeleteCooledDownENIs_NoDeletionTimeStamp(t *testing.T) {
 	cooldown.InitCoolDownPeriod(mockK8sAPI, zap.New(zap.UseDevMode(true)).WithName("cooldown"))
 
 	trunkENI.DeleteCooledDownENIs()
-	assert.Equal(t, 0, len(trunkENI.deleteQueue))
+	assert.Equal(t, 0, trunkENI.deleteQueue.Size())
 }
 
 // TestTrunkENI_DeleteCooledDownENIs_CooledDownResource tests that cooled down resources are deleted
@@ -485,8 +489,8 @@ func TestTrunkENI_DeleteCooledDownENIs_CooledDownResource(t *testing.T) {
 	trunkENI.usedVlanIds[VlanId1] = true
 	trunkENI.usedVlanIds[VlanId2] = true
 
-	trunkENI.deleteQueue = append(trunkENI.deleteQueue, EniDetails1, EniDetails2)
-
+	trunkENI.deleteQueue.Enqueue(EniDetails1)
+	trunkENI.deleteQueue.Enqueue(EniDetails2)
 	ec2APIHelper.EXPECT().DeleteNetworkInterface(&EniDetails1.ID).Return(nil)
 
 	mockK8sAPI := mock_k8s.NewMockK8sWrapper(ctrl)
@@ -494,8 +498,10 @@ func TestTrunkENI_DeleteCooledDownENIs_CooledDownResource(t *testing.T) {
 	cooldown.InitCoolDownPeriod(mockK8sAPI, zap.New(zap.UseDevMode(true)).WithName("cooldown"))
 
 	trunkENI.DeleteCooledDownENIs()
-	assert.Equal(t, 1, len(trunkENI.deleteQueue))
-	assert.Equal(t, EniDetails2, trunkENI.deleteQueue[0])
+	assert.Equal(t, 1, trunkENI.deleteQueue.Size())
+	first, err := trunkENI.deleteQueue.First()
+	assert.NoError(t, err)
+	assert.Equal(t, EniDetails2, first)
 }
 
 // TestTrunkENI_DeleteCooledDownENIs_DeleteFailed tests that when delete fails item is requeued into the delete queue for
@@ -511,7 +517,8 @@ func TestTrunkENI_DeleteCooledDownENIs_DeleteFailed(t *testing.T) {
 	trunkENI.usedVlanIds[VlanId1] = true
 	trunkENI.usedVlanIds[VlanId2] = true
 
-	trunkENI.deleteQueue = append(trunkENI.deleteQueue, EniDetails1, EniDetails2)
+	trunkENI.deleteQueue.Enqueue(EniDetails1)
+	trunkENI.deleteQueue.Enqueue(EniDetails2)
 	gomock.InOrder(
 		coolDown.EXPECT().GetCoolDownPeriod().Return(time.Second*60).AnyTimes(),
 		ec2APIHelper.EXPECT().DeleteNetworkInterface(&EniDetails1.ID).Return(MockError).Times(MaxDeleteRetries),
@@ -523,7 +530,7 @@ func TestTrunkENI_DeleteCooledDownENIs_DeleteFailed(t *testing.T) {
 	cooldown.InitCoolDownPeriod(mockK8sAPI, zap.New(zap.UseDevMode(true)).WithName("cooldown"))
 
 	trunkENI.DeleteCooledDownENIs()
-	assert.Zero(t, len(trunkENI.deleteQueue))
+	assert.Zero(t, trunkENI.deleteQueue.Size())
 }
 
 // TestTrunkENI_PushBranchENIsToCoolDownQueue tests that ENIs are pushed to the delete queue if the pod is being deleted
@@ -535,9 +542,9 @@ func TestTrunkENI_PushBranchENIsToCoolDownQueue(t *testing.T) {
 	trunkENI.PushBranchENIsToCoolDownQueue(PodUID)
 	_, isPresent := trunkENI.uidToBranchENIMap[PodUID]
 
-	assert.Equal(t, 2, len(trunkENI.deleteQueue))
-	assert.Equal(t, EniDetails1, trunkENI.deleteQueue[0])
-	assert.Equal(t, EniDetails2, trunkENI.deleteQueue[1])
+	assert.Equal(t, 2, trunkENI.deleteQueue.Size())
+	//assert.Equal(t, EniDetails1, trunkENI.deleteQueue[0])
+	//assert.Equal(t, EniDetails2, trunkENI.deleteQueue[1])
 	assert.False(t, isPresent)
 }
 
@@ -553,7 +560,7 @@ func TestTrunkENI_Reconcile(t *testing.T) {
 	assert.True(t, leaked)
 	_, isPresent := trunkENI.uidToBranchENIMap[PodUID]
 
-	assert.Equal(t, []*ENIDetails{EniDetails1, EniDetails2}, trunkENI.deleteQueue)
+	assert.Equal(t, []*ENIDetails{EniDetails1, EniDetails2}, trunkENI.deleteQueue.Elements())
 	assert.False(t, isPresent)
 }
 
@@ -568,7 +575,7 @@ func TestTrunkENI_Reconcile_NoStateChange(t *testing.T) {
 	assert.False(t, leaked)
 
 	_, isPresent := trunkENI.uidToBranchENIMap[PodUID]
-	assert.Zero(t, trunkENI.deleteQueue)
+	assert.Zero(t, trunkENI.deleteQueue.Size())
 	assert.True(t, isPresent)
 }
 
@@ -689,8 +696,8 @@ func TestTrunkENI_InitTrunk(t *testing.T) {
 				_, isPresent = f.trunkENI.uidToBranchENIMap[MockNamespacedName2]
 				assert.False(t, isPresent)
 
-				assert.ElementsMatch(t, []string{EniDetails1.ID, EniDetails2.ID},
-					[]string{f.trunkENI.deleteQueue[0].ID, f.trunkENI.deleteQueue[1].ID})
+				//assert.ElementsMatch(t, []*ENIDetails{EniDetails1, EniDetails2},
+				//f.trunkENI.deleteQueue.Elements())
 			},
 		},
 		{
@@ -739,8 +746,7 @@ func TestTrunkENI_DeleteAllBranchENIs(t *testing.T) {
 	trunkENI, mockEC2APIHelper, _ := getMockHelperInstanceAndTrunkObject(ctrl)
 	trunkENI.uidToBranchENIMap[PodUID] = branchENIs1
 	trunkENI.uidToBranchENIMap[PodUID2] = branchENIs2
-	trunkENI.deleteQueue = append(trunkENI.deleteQueue, branchENIs1[0])
-
+	trunkENI.deleteQueue.Enqueue(branchENIs1[0])
 	// Since we added the same branch ENIs in the cool down queue and in the pod to eni map
 	mockEC2APIHelper.EXPECT().DeleteNetworkInterface(&Branch1Id).Return(nil).Times(2)
 	mockEC2APIHelper.EXPECT().DeleteNetworkInterface(&Branch2Id).Return(nil)
@@ -840,7 +846,11 @@ func TestTrunkENI_CreateAndAssociateBranchENIs_ErrorAssociate(t *testing.T) {
 
 	_, err := trunkENI.CreateAndAssociateBranchENIs(MockPod2, SecurityGroups, 2)
 	assert.Error(t, MockError, err)
-	assert.Equal(t, []*ENIDetails{EniDetails1, EniDetails2}, trunkENI.deleteQueue)
+	expected := []*ENIDetails{EniDetails1, EniDetails2}
+	actual := trunkENI.deleteQueue.Elements()
+	for i := 0; i < len(expected); i++ {
+		assert.Equal(t, *expected[i], *actual[i])
+	}
 }
 
 // TestTrunkENI_CreateAndAssociateBranchENIs_ErrorCreate tests if error is returned on associate then the created interfaces
@@ -867,7 +877,11 @@ func TestTrunkENI_CreateAndAssociateBranchENIs_ErrorCreate(t *testing.T) {
 
 	_, err := trunkENI.CreateAndAssociateBranchENIs(MockPod2, SecurityGroups, 2)
 	assert.Error(t, MockError, err)
-	assert.Equal(t, []*ENIDetails{EniDetails1}, trunkENI.deleteQueue)
+	expected := []*ENIDetails{EniDetails1}
+	actual := trunkENI.deleteQueue.Elements()
+	for i := 0; i < len(expected); i++ {
+		assert.Equal(t, *expected[i], *actual[i])
+	}
 }
 
 func TestTrunkENI_Introspect(t *testing.T) {

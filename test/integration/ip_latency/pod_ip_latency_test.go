@@ -153,6 +153,7 @@ var _ = Describe("Pod IP Assignment Latency Test", func() {
 
 		latencies := []time.Duration{}
 		pods_missed_events := 0
+		time.Sleep(60 * time.Second)
 		for _, podName := range allPodNames {
 			events, err := frameWork.PodManager.GetPodEvents(ctx, podName, namespace)
 			Expect(err).NotTo(HaveOccurred())
@@ -168,6 +169,9 @@ var _ = Describe("Pod IP Assignment Latency Test", func() {
 			}
 		}
 		fmt.Println("pods_missed_event", pods_missed_events)
+		if pods_missed_events > 0 {
+			time.Sleep(180 * time.Second)
+		}
 		var totalLatency time.Duration
 		for _, latency := range latencies {
 			totalLatency += latency

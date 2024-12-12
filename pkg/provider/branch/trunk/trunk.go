@@ -125,7 +125,7 @@ type trunkENI struct {
 	// branchENIs is the list of BranchENIs associated with the trunk
 	uidToBranchENIMap map[string][]*ENIDetails
 	// deleteQueue is the queue of ENIs that are being cooled down before being deleted
-	deleteQueue []*ENIDetails
+	deleteQueue QueueInterface
 }
 
 // PodENI is a json convertible structure that stores the Branch ENI details that can be
@@ -176,6 +176,7 @@ func NewTrunkENI(logger logr.Logger, instance ec2.EC2Instance, helper api.EC2API
 		ec2ApiHelper:      helper,
 		instance:          instance,
 		uidToBranchENIMap: make(map[string][]*ENIDetails),
+		deleteQueue:       NewQueue(120),
 	}
 }
 
@@ -363,7 +364,7 @@ func (t *trunkENI) Reconcile(pods []v1.Pod) bool {
 			for _, eni := range branchENIs {
 				// Pod could have been deleted recently, set the timestamp to current time as controller is not aware of the actual time.
 				eni.deletionTimeStamp = time.Now()
-				t.deleteQueue = append(t.deleteQueue, eni)
+				t.deleteQueue.Enqueue(eni)
 			}
 			delete(t.uidToBranchENIMap, uid)
 			t.log.Info("leaked eni pushed to delete queue, deleted non-existing pod", "pod uid", uid, "eni", branchENIs)
@@ -455,7 +456,10 @@ func (t *trunkENI) CreateAndAssociateBranchENIs(pod *v1.Pod, securityGroups []st
 	if err != nil {
 		log.Error(err, "failed to create ENI, moving the ENI to delete list")
 		// Moving to delete list, because it has all the retrying logic in case of failure
-		t.PushENIsToFrontOfDeleteQueue(nil, newENIs)
+		//t.PushENIsToFrontOfDeleteQueue(nil, newENIs)
+		for _, eni := range newENIs {
+			t.pushENIToDeleteQueue(eni)
+		}
 		return nil, err
 	}
 
@@ -482,9 +486,12 @@ func (t *trunkENI) DeleteAllBranchENIs() {
 		}
 	}
 
-	// Delete all the branch ENI present in the cool down queue
-	for _, eni := range t.deleteQueue {
-		err := t.deleteENI(eni)
+	for t.deleteQueue.Size() > 0 {
+		eni, err := t.deleteQueue.Dequeue()
+		if err != nil {
+			t.log.Error(err, "failed to dequeue eni from queue", "eni id", eni.ID)
+		}
+		err = t.deleteENI(eni)
 		if err != nil {
 			// Just log, if the ENI still exists it can be removed by the dangling ENI cleaner routine
 			t.log.Error(err, "failed to delete eni", "eni id", eni.ID)
@@ -508,7 +515,7 @@ func (t *trunkENI) PushBranchENIsToCoolDownQueue(UID string) {
 
 	for _, eni := range branchENIs {
 		eni.deletionTimeStamp = time.Now()
-		t.deleteQueue = append(t.deleteQueue, eni)
+		t.deleteQueue.Enqueue(eni)
 	}
 
 	delete(t.uidToBranchENIMap, UID)
@@ -518,9 +525,13 @@ func (t *trunkENI) PushBranchENIsToCoolDownQueue(UID string) {
 }
 
 func (t *trunkENI) DeleteCooledDownENIs() {
-	for eni, hasENI := t.popENIFromDeleteQueue(); hasENI; eni, hasENI = t.popENIFromDeleteQueue() {
-		if eni.deletionTimeStamp.IsZero() ||
-			time.Now().After(eni.deletionTimeStamp.Add(cooldown.GetCoolDown().GetCoolDownPeriod())) {
+	for t.deleteQueue.Size() > 0 {
+		eni, err := t.deleteQueue.Dequeue()
+		if err != nil {
+			t.log.Error(err, "fail to dequeue eni", "eni id", eni.ID)
+		}
+		cooldownExpired := time.Since(eni.deletionTimeStamp) > cooldown.GetCoolDown().GetCoolDownPeriod()
+		if eni.deletionTimeStamp.IsZero() || cooldownExpired {
 			err := t.deleteENI(eni)
 			if err != nil {
 				eni.deleteRetryCount++
@@ -595,7 +606,7 @@ func (t *trunkENI) pushENIToDeleteQueue(eni *ENIDetails) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
-	t.deleteQueue = append(t.deleteQueue, eni)
+	t.deleteQueue.Enqueue(eni)
 }
 
 // pushENIsToFrontOfDeleteQueue pushes the ENI list to the front of the delete queue
@@ -610,22 +621,9 @@ func (t *trunkENI) PushENIsToFrontOfDeleteQueue(pod *v1.Pod, eniList []*ENIDetai
 	} else {
 		t.log.Info("pushing ENIs to delete queue", "ENIs", eniList)
 	}
-
-	t.deleteQueue = append(eniList, t.deleteQueue...)
-}
-
-// popENIFromDeleteQueue pops an ENI from delete queue, if the queue is empty then the false is returned
-func (t *trunkENI) popENIFromDeleteQueue() (eni *ENIDetails, hasENI bool) {
-	t.lock.Lock()
-	defer t.lock.Unlock()
-
-	if len(t.deleteQueue) > 0 {
-		eni = t.deleteQueue[0]
-		hasENI = true
-		t.deleteQueue = t.deleteQueue[1:]
+	for i := len(eniList) - 1; i >= 0; i-- {
+		t.deleteQueue.EnqueueFront(eniList[i])
 	}
-
-	return eni, hasENI
 }
 
 // addBranchToCache adds the given branch to the cache if not already present
@@ -706,7 +704,7 @@ func (t *trunkENI) canCreateMore() bool {
 		usedBranches += len(branches)
 	}
 
-	if usedBranches+len(t.deleteQueue) < vpc.Limits[t.instance.Type()].BranchInterface {
+	if usedBranches+t.deleteQueue.Size() < vpc.Limits[t.instance.Type()].BranchInterface {
 		return true
 	}
 	return false
@@ -728,7 +726,7 @@ func (t *trunkENI) Introspect() IntrospectResponse {
 		}
 		response.PodToBranchENI[uid] = eniDetails
 	}
-	for _, eni := range t.deleteQueue {
+	for _, eni := range t.deleteQueue.Elements() {
 		response.DeleteQueue = append(response.DeleteQueue, *eni)
 	}
 	return response
