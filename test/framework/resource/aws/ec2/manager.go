@@ -62,49 +62,49 @@ func (d *Manager) GetInstanceDetails(instanceID string) (*ec2.Instance, error) {
 	return describeInstanceOutput.Reservations[0].Instances[0], nil
 }
 
-func (d *Manager) AuthorizeSecurityGroupIngress(securityGroupID string, port int,
+func (d *Manager) AuthorizeSecurityGroupIngress(securityGroupID string, fromPort int, toPort int,
 	protocol string) error {
 
 	_, err := d.ec2Client.AuthorizeSecurityGroupIngress(&ec2.AuthorizeSecurityGroupIngressInput{
 		GroupId: &securityGroupID,
 		IpPermissions: []*ec2.IpPermission{
 			{
-				FromPort:   aws.Int64(int64(port)),
+				FromPort:   aws.Int64(int64(fromPort)),
 				IpProtocol: aws.String(protocol),
 				IpRanges:   []*ec2.IpRange{{CidrIp: aws.String("0.0.0.0/0")}},
-				ToPort:     aws.Int64(int64(port)),
+				ToPort:     aws.Int64(int64(toPort)),
 			},
 		},
 	})
 	return err
 }
 
-func (d *Manager) AuthorizeSecurityGroupEgress(securityGroupID string, port int,
+func (d *Manager) AuthorizeSecurityGroupEgress(securityGroupID string, fromPort int, toPort int,
 	protocol string) error {
 	_, err := d.ec2Client.AuthorizeSecurityGroupEgress(&ec2.AuthorizeSecurityGroupEgressInput{
 		GroupId: &securityGroupID,
 		IpPermissions: []*ec2.IpPermission{
 			{
-				FromPort:   aws.Int64(int64(port)),
+				FromPort:   aws.Int64(int64(fromPort)),
 				IpProtocol: aws.String(protocol),
-				IpRanges:   []*ec2.IpRange{{CidrIp: aws.String("0.0.0.0/0")}},
-				ToPort:     aws.Int64(int64(port)),
+				IpRanges:   []*ec2.IpRange{{CidrIp: aws.String("10.0.0.0/8")},{CidrIp: aws.String("8.8.8.8/32")}},
+				ToPort:     aws.Int64(int64(toPort)),
 			},
 		},
 	})
 	return err
 }
 
-func (d *Manager) RevokeSecurityGroupIngress(securityGroupID string, port int,
+func (d *Manager) RevokeSecurityGroupIngress(securityGroupID string, fromPort int, toPort int,
 	protocol string) error {
 	_, err := d.ec2Client.RevokeSecurityGroupIngress(&ec2.RevokeSecurityGroupIngressInput{
 		GroupId: aws.String(securityGroupID),
 		IpPermissions: []*ec2.IpPermission{
 			{
-				FromPort:   aws.Int64(int64(port)),
+				FromPort:   aws.Int64(int64(fromPort)),
 				IpProtocol: aws.String(protocol),
 				IpRanges:   []*ec2.IpRange{{CidrIp: aws.String("0.0.0.0/0")}},
-				ToPort:     aws.Int64(int64(port)),
+				ToPort:     aws.Int64(int64(toPort)),
 			},
 		},
 	})

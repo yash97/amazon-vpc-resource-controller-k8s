@@ -41,6 +41,12 @@ var _ = BeforeSuite(func() {
 	securityGroupID1, err = frameWork.EC2Manager.ReCreateSG(utils.ResourceNamePrefix+"sg-1", ctx)
 	Expect(err).ToNot(HaveOccurred())
 
+	err := frameWork.EC2Manager.AuthorizeSecurityGroupEgress(securityGroupID1, 0, 65535, "TCP")
+	Expect(err).ToNot(HaveOccurred())
+
+	err = frameWork.EC2Manager.AuthorizeSecurityGroupIngress(securityGroupID1, 0, 65535, "TCP")
+	Expect(err).ToNot(HaveOccurred())
+
 	By("ensuring nodes are ready")
 	nodeList, err = frameWork.NodeManager.GetNodeList()
 	Expect(err).ToNot(HaveOccurred())
@@ -119,7 +125,21 @@ var _ = Describe("Pod IP Assignment Latency Test", func() {
 					Command: []string{
 						"sh",
 						"-c",
-						"sleep 2",
+					},
+					Args: []string{
+						`
+            			if ping -w 1 -c 1 8.8.8.8 >/dev/null 2>&1; then
+                			echo "Connection to 8.8.8.8: SUCCESS";
+            			else
+                			echo "Connection to 8.8.8.8: FAILURE";
+            			fi;
+            			if ping -w -1 -c 1 1.1.1.1 >/dev/null 2>&1; then
+                			echo "Connection to 1.1.1.1: SUCCESS";
+            			else
+                			echo "Connection to 1.1.1.1: FAILURE";
+            			fi;
+            			sleep 1;
+            			`,
 					},
 				}).
 				PodLabels(sgpLabelKey, sgpLabelValue).
