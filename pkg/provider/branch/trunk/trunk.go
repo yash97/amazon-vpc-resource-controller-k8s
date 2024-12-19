@@ -16,6 +16,7 @@ package trunk
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"slices"
 	"strconv"
 	"strings"
@@ -106,6 +107,8 @@ type TrunkENI interface {
 	DeleteAllBranchENIs()
 	// Introspect returns the state of the Trunk ENI
 	Introspect() IntrospectResponse
+	// Get least cooldown period from eni cooldown queue
+	GetLeastCoolDownTime() (time.Duration, error)
 }
 
 // trunkENI is the first trunk network interface of an instance
@@ -730,4 +733,22 @@ func (t *trunkENI) Introspect() IntrospectResponse {
 		response.DeleteQueue = append(response.DeleteQueue, *eni)
 	}
 	return response
+}
+
+func (t *trunkENI) GetLeastCoolDownTime() (time.Duration, error) {
+	eniDetails, err := t.deleteQueue.First()
+	if err != nil {
+		return 0, err
+	}
+
+	timeSpent := time.Since(eniDetails.deletionTimeStamp)
+	cooldownPeriod := cooldown.GetCoolDown().GetCoolDownPeriod()
+
+	remaining := cooldownPeriod - timeSpent
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	jitter := time.Duration(rand.Intn(100)) * time.Millisecond
+	return remaining + jitter, err
 }

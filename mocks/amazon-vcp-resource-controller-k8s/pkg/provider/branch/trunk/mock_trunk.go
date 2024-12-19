@@ -6,6 +6,7 @@ package mock_trunk
 
 import (
 	reflect "reflect"
+	time "time"
 
 	ec2 "github.com/aws/amazon-vpc-resource-controller-k8s/pkg/aws/ec2"
 	trunk "github.com/aws/amazon-vpc-resource-controller-k8s/pkg/provider/branch/trunk"
@@ -73,6 +74,21 @@ func (m *MockTrunkENI) DeleteCooledDownENIs() {
 func (mr *MockTrunkENIMockRecorder) DeleteCooledDownENIs() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteCooledDownENIs", reflect.TypeOf((*MockTrunkENI)(nil).DeleteCooledDownENIs))
+}
+
+// GetLeastCoolDownTime mocks base method.
+func (m *MockTrunkENI) GetLeastCoolDownTime() (time.Duration, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetLeastCoolDownTime")
+	ret0, _ := ret[0].(time.Duration)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetLeastCoolDownTime indicates an expected call of GetLeastCoolDownTime.
+func (mr *MockTrunkENIMockRecorder) GetLeastCoolDownTime() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLeastCoolDownTime", reflect.TypeOf((*MockTrunkENI)(nil).GetLeastCoolDownTime))
 }
 
 // InitTrunk mocks base method.

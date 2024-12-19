@@ -81,7 +81,7 @@ var _ = BeforeSuite(func() {
 
 	By("authorizing the security group ingress for HTTP traffic")
 	defaultTestPort = 80
-	frameWork.EC2Manager.AuthorizeSecurityGroupIngress(instanceSecurityGroup, defaultTestPort, "TCP")
+	frameWork.EC2Manager.AuthorizeSecurityGroupIngress(instanceSecurityGroup, defaultTestPort, defaultTestPort, "TCP")
 
 	rand.Seed(time.Now().UnixNano())
 })
@@ -95,5 +95,5 @@ var _ = AfterSuite(func() {
 	}
 
 	By("revoking the security group ingress for HTTP traffic")
-	frameWork.EC2Manager.RevokeSecurityGroupIngress(instanceSecurityGroup, defaultTestPort, "TCP")
+	frameWork.EC2Manager.RevokeSecurityGroupIngress(instanceSecurityGroup, defaultTestPort, defaultTestPort, "TCP")
 })

@@ -87,7 +87,7 @@ func (d *Manager) AuthorizeSecurityGroupEgress(securityGroupID string, fromPort 
 			{
 				FromPort:   aws.Int64(int64(fromPort)),
 				IpProtocol: aws.String(protocol),
-				IpRanges:   []*ec2.IpRange{{CidrIp: aws.String("10.0.0.0/8")},{CidrIp: aws.String("8.8.8.8/32")}},
+				IpRanges:   []*ec2.IpRange{{CidrIp: aws.String("10.0.0.0/8")}, {CidrIp: aws.String("8.8.8.8/32")}},
 				ToPort:     aws.Int64(int64(toPort)),
 			},
 		},

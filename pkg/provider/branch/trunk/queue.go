@@ -2,6 +2,7 @@ package trunk
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 )
 
@@ -42,7 +43,7 @@ func NewQueue(cap int) QueueInterface {
 func (q *Queue) Enqueue(value *ENIDetails) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-
+	fmt.Println("enqueueing eni in delete queue ", value)
 	if q.count == q.capacity {
 		q.resize()
 	}
@@ -81,7 +82,7 @@ func (q *Queue) Dequeue() (*ENIDetails, error) {
 	q.data[q.head] = zeroValue
 	q.head = (q.head + 1) % q.capacity
 	q.count--
-
+	fmt.Println("dequeue ing eni ", val)
 	return val, nil
 }
 

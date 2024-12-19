@@ -180,14 +180,14 @@ var _ = Describe("Security Group Per Pod", func() {
 			JustBeforeEach(func() {
 				By("authorizing ingress to server port")
 				err = frameWork.EC2Manager.
-					AuthorizeSecurityGroupIngress(securityGroups[0], serverPort, "TCP")
+					AuthorizeSecurityGroupIngress(securityGroups[0], serverPort, serverPort, "TCP")
 				Expect(err).ToNot(HaveOccurred())
 			})
 
 			JustAfterEach(func() {
 				By("revoking ingress to server port")
 				err = frameWork.EC2Manager.
-					RevokeSecurityGroupIngress(securityGroups[0], serverPort, "TCP")
+					RevokeSecurityGroupIngress(securityGroups[0], serverPort, serverPort, "TCP")
 				Expect(err).ToNot(HaveOccurred())
 			})
 
