@@ -107,12 +107,12 @@ var _ = Describe("Pod IP Assignment Latency Test", func() {
 		maxENICapacity := nodeList.Items[0].Status.Allocatable[config.ResourceNamePodENI]
 		branchInterfacePerNode, ok := maxENICapacity.AsInt64()
 		Expect(ok).To(BeTrue())
-		totalPodsPerChurn := 2 * int(branchInterfacePerNode) * len(nodeList.Items)
+		totalPodsPerChurn := int(branchInterfacePerNode) * len(nodeList.Items)
 		fmt.Printf("deploying %d pods per no", totalPodsPerChurn)
 		allPodNames := []string{}
 
 		// Performing pod wave
-		for wave := 0; wave < 2; wave++ {
+		for wave := 0; wave < 5; wave++ {
 			By(fmt.Sprintf("Starting churn iteration %d", wave+1))
 
 			job := manifest.NewLinuxJob().

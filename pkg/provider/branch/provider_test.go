@@ -470,7 +470,7 @@ func TestBranchENIProvider_CreateAndAnnotateResources_Annotate_Error(t *testing.
 	mockPodAPI.EXPECT().AnnotatePod(MockPodNamespace1, MockPodName1, MockPodUID1,
 		config.ResourceNamePodENI, string(expectedAnnotation)).Return(MockError)
 	mockK8sAPI.EXPECT().BroadcastEvent(MockPod1, ReasonBranchENIAnnotationFailed, gomock.Any(), v1.EventTypeWarning)
-	fakeTrunk.EXPECT().PushENIsToFrontOfDeleteQueue(MockPod1, EniDetails)
+	fakeTrunk.EXPECT().PushENIsToDeleteQueue(MockPod1, EniDetails)
 
 	_, err := provider.CreateAndAnnotateResources(MockPodNamespace1, MockPodName1, resCount)
 

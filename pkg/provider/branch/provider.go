@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/exp/rand"
 
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/api"
 	"github.com/aws/amazon-vpc-resource-controller-k8s/pkg/aws/ec2"
@@ -358,7 +359,14 @@ func (b *branchENIProvider) CreateAndAnnotateResources(podNamespace string, podN
 	branchENIs, err := trunkENI.CreateAndAssociateBranchENIs(pod, securityGroups, resourceCount)
 	if err != nil {
 		if err == trunk.ErrCurrentlyAtMaxCapacity {
-			return ctrl.Result{RequeueAfter: 5 * time.Second, Requeue: true}, nil
+			t, err1 := trunkENI.GetLeastRemainingCoolDownTime()
+			fmt.Println("got leat cooled down time ", t.Seconds())
+			if err1 != nil {
+				b.log.Error(err, "error getting least remaining cool down time", "error", err1)
+			}
+			jitter := time.Duration(rand.Int63n(int64(time.Second * 2)))
+			fmt.Println("jitter ", jitter)
+			return ctrl.Result{RequeueAfter: t + jitter, Requeue: true}, nil
 		}
 		b.apiWrapper.K8sAPI.BroadcastEvent(pod, ReasonBranchAllocationFailed,
 			fmt.Sprintf("failed to allocate branch ENI to pod: %v", err), v1.EventTypeWarning)
@@ -370,7 +378,7 @@ func (b *branchENIProvider) CreateAndAnnotateResources(podNamespace string, podN
 
 	jsonBytes, err := json.Marshal(branchENIs)
 	if err != nil {
-		trunkENI.PushENIsToFrontOfDeleteQueue(pod, branchENIs)
+		trunkENI.PushENIsToDeleteQueue(pod, branchENIs)
 		b.log.Info("pushed the ENIs to the delete queue as failed to unmarshal ENI details", "ENI/s", branchENIs)
 		branchProviderOperationsErrCount.WithLabelValues("annotate_branch_eni").Inc()
 		return ctrl.Result{}, err
@@ -381,7 +389,7 @@ func (b *branchENIProvider) CreateAndAnnotateResources(podNamespace string, podN
 	err = b.apiWrapper.PodAPI.AnnotatePod(pod.Namespace, pod.Name, pod.UID,
 		config.ResourceNamePodENI, string(jsonBytes))
 	if err != nil {
-		trunkENI.PushENIsToFrontOfDeleteQueue(pod, branchENIs)
+		trunkENI.PushENIsToDeleteQueue(pod, branchENIs)
 		b.log.Info("pushed the ENIs to the delete queue as failed to annotate the pod", "ENI/s", branchENIs)
 		b.apiWrapper.K8sAPI.BroadcastEvent(pod, ReasonBranchENIAnnotationFailed,
 			fmt.Sprintf("failed to annotate pod with branch ENI details: %v", err), v1.EventTypeWarning)

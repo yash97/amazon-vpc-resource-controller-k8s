@@ -82,7 +82,7 @@ func (q *Queue) Dequeue() (*ENIDetails, error) {
 	q.data[q.head] = zeroValue
 	q.head = (q.head + 1) % q.capacity
 	q.count--
-	fmt.Println("dequeue ing eni ", val)
+	fmt.Println("dequeueing eni ", val)
 	return val, nil
 }
 
@@ -133,7 +133,6 @@ func (q *Queue) Elements() []*ENIDetails {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	// Create a slice to hold the snapshot of elements
 	elems := make([]*ENIDetails, q.count)
 	for i := 0; i < q.count; i++ {
 		elems[i] = q.data[(q.head+i)%q.capacity]

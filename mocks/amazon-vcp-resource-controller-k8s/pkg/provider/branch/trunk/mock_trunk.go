@@ -76,19 +76,19 @@ func (mr *MockTrunkENIMockRecorder) DeleteCooledDownENIs() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteCooledDownENIs", reflect.TypeOf((*MockTrunkENI)(nil).DeleteCooledDownENIs))
 }
 
-// GetLeastCoolDownTime mocks base method.
-func (m *MockTrunkENI) GetLeastCoolDownTime() (time.Duration, error) {
+// GetLeastRemainingCoolDownTime mocks base method.
+func (m *MockTrunkENI) GetLeastRemainingCoolDownTime() (time.Duration, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetLeastCoolDownTime")
+	ret := m.ctrl.Call(m, "GetLeastRemainingCoolDownTime")
 	ret0, _ := ret[0].(time.Duration)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// GetLeastCoolDownTime indicates an expected call of GetLeastCoolDownTime.
-func (mr *MockTrunkENIMockRecorder) GetLeastCoolDownTime() *gomock.Call {
+// GetLeastRemainingCoolDownTime indicates an expected call of GetLeastRemainingCoolDownTime.
+func (mr *MockTrunkENIMockRecorder) GetLeastRemainingCoolDownTime() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLeastCoolDownTime", reflect.TypeOf((*MockTrunkENI)(nil).GetLeastCoolDownTime))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLeastRemainingCoolDownTime", reflect.TypeOf((*MockTrunkENI)(nil).GetLeastRemainingCoolDownTime))
 }
 
 // InitTrunk mocks base method.
@@ -131,16 +131,16 @@ func (mr *MockTrunkENIMockRecorder) PushBranchENIsToCoolDownQueue(UID interface{
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PushBranchENIsToCoolDownQueue", reflect.TypeOf((*MockTrunkENI)(nil).PushBranchENIsToCoolDownQueue), UID)
 }
 
-// PushENIsToFrontOfDeleteQueue mocks base method.
-func (m *MockTrunkENI) PushENIsToFrontOfDeleteQueue(arg0 *v1.Pod, arg1 []*trunk.ENIDetails) {
+// PushENIsToDeleteQueue mocks base method.
+func (m *MockTrunkENI) PushENIsToDeleteQueue(arg0 *v1.Pod, arg1 []*trunk.ENIDetails) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "PushENIsToFrontOfDeleteQueue", arg0, arg1)
+	m.ctrl.Call(m, "PushENIsToDeleteQueue", arg0, arg1)
 }
 
-// PushENIsToFrontOfDeleteQueue indicates an expected call of PushENIsToFrontOfDeleteQueue.
-func (mr *MockTrunkENIMockRecorder) PushENIsToFrontOfDeleteQueue(arg0, arg1 interface{}) *gomock.Call {
+// PushENIsToDeleteQueue indicates an expected call of PushENIsToDeleteQueue.
+func (mr *MockTrunkENIMockRecorder) PushENIsToDeleteQueue(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PushENIsToFrontOfDeleteQueue", reflect.TypeOf((*MockTrunkENI)(nil).PushENIsToFrontOfDeleteQueue), arg0, arg1)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PushENIsToDeleteQueue", reflect.TypeOf((*MockTrunkENI)(nil).PushENIsToDeleteQueue), arg0, arg1)
 }
 
 // Reconcile mocks base method.

@@ -15,8 +15,8 @@ package trunk
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"math/rand"
 	"slices"
 	"strconv"
 	"strings"
@@ -102,13 +102,13 @@ type TrunkENI interface {
 	// Reconcile compares the cache state with the list of pods to identify events that were missed and clean up the dangling interfaces
 	Reconcile(pods []v1.Pod) bool
 	// PushENIsToFrontOfDeleteQueue pushes the eni network interfaces to the front of the delete queue
-	PushENIsToFrontOfDeleteQueue(*v1.Pod, []*ENIDetails)
+	PushENIsToDeleteQueue(*v1.Pod, []*ENIDetails)
 	// DeleteAllBranchENIs deletes all the branch ENI associated with the trunk and also clears the cool down queue
 	DeleteAllBranchENIs()
 	// Introspect returns the state of the Trunk ENI
 	Introspect() IntrospectResponse
 	// Get least cooldown period from eni cooldown queue
-	GetLeastCoolDownTime() (time.Duration, error)
+	GetLeastRemainingCoolDownTime() (time.Duration, error)
 }
 
 // trunkENI is the first trunk network interface of an instance
@@ -128,7 +128,7 @@ type trunkENI struct {
 	// branchENIs is the list of BranchENIs associated with the trunk
 	uidToBranchENIMap map[string][]*ENIDetails
 	// deleteQueue is the queue of ENIs that are being cooled down before being deleted
-	deleteQueue QueueInterface
+	deleteQueue ENIHeap
 }
 
 // PodENI is a json convertible structure that stores the Branch ENI details that can be
@@ -148,6 +148,8 @@ type ENIDetails struct {
 	SubnetV6CIDR string `json:"subnetV6Cidr"`
 	// deletionTimeStamp is the time when the pod was marked deleted.
 	deletionTimeStamp time.Time
+	//timestamp after which it can be deleted
+	nextDueTime time.Time
 	// deleteRetryCount is the
 	deleteRetryCount int
 }
@@ -179,7 +181,7 @@ func NewTrunkENI(logger logr.Logger, instance ec2.EC2Instance, helper api.EC2API
 		ec2ApiHelper:      helper,
 		instance:          instance,
 		uidToBranchENIMap: make(map[string][]*ENIDetails),
-		deleteQueue:       NewQueue(120),
+		deleteQueue:       NewENIHeap(),
 	}
 }
 
@@ -367,7 +369,7 @@ func (t *trunkENI) Reconcile(pods []v1.Pod) bool {
 			for _, eni := range branchENIs {
 				// Pod could have been deleted recently, set the timestamp to current time as controller is not aware of the actual time.
 				eni.deletionTimeStamp = time.Now()
-				t.deleteQueue.Enqueue(eni)
+				t.pushENIToDeleteQueue(eni)
 			}
 			delete(t.uidToBranchENIMap, uid)
 			t.log.Info("leaked eni pushed to delete queue, deleted non-existing pod", "pod uid", uid, "eni", branchENIs)
@@ -489,12 +491,13 @@ func (t *trunkENI) DeleteAllBranchENIs() {
 		}
 	}
 
-	for t.deleteQueue.Size() > 0 {
-		eni, err := t.deleteQueue.Dequeue()
-		if err != nil {
-			t.log.Error(err, "failed to dequeue eni from queue", "eni id", eni.ID)
+	for t.deleteQueue.Len() > 0 {
+		eni, ok := t.deleteQueue.Pop()
+		if !ok {
+			t.log.Error(nil, "failed to dequeue eni from queue")
+			break
 		}
-		err = t.deleteENI(eni)
+		err := t.deleteENI(eni)
 		if err != nil {
 			// Just log, if the ENI still exists it can be removed by the dangling ENI cleaner routine
 			t.log.Error(err, "failed to delete eni", "eni id", eni.ID)
@@ -518,7 +521,7 @@ func (t *trunkENI) PushBranchENIsToCoolDownQueue(UID string) {
 
 	for _, eni := range branchENIs {
 		eni.deletionTimeStamp = time.Now()
-		t.deleteQueue.Enqueue(eni)
+		t.pushENIToDeleteQueue(eni)
 	}
 
 	delete(t.uidToBranchENIMap, UID)
@@ -528,13 +531,15 @@ func (t *trunkENI) PushBranchENIsToCoolDownQueue(UID string) {
 }
 
 func (t *trunkENI) DeleteCooledDownENIs() {
-	for t.deleteQueue.Size() > 0 {
-		eni, err := t.deleteQueue.Dequeue()
-		if err != nil {
-			t.log.Error(err, "fail to dequeue eni", "eni id", eni.ID)
+	queue_len := t.deleteQueue.Len()
+	fmt.Print(len(t.deleteQueue.Items()))
+	for i := 0; i < queue_len; i++ {
+		eni, ok := t.deleteQueue.Pop()
+		if !ok {
+			t.log.Error(nil, "failed to dequeue eni")
+			break
 		}
-		cooldownExpired := time.Since(eni.deletionTimeStamp) > cooldown.GetCoolDown().GetCoolDownPeriod()
-		if eni.deletionTimeStamp.IsZero() || cooldownExpired {
+		if time.Now().Compare(eni.nextDueTime) >= 0 {
 			err := t.deleteENI(eni)
 			if err != nil {
 				eni.deleteRetryCount++
@@ -544,15 +549,17 @@ func (t *trunkENI) DeleteCooledDownENIs() {
 					continue
 				}
 				t.log.Error(err, "failed to delete eni, will retry", "eni", eni)
-				t.PushENIsToFrontOfDeleteQueue(nil, []*ENIDetails{eni})
+				eni.nextDueTime = time.Now().Add(cooldown.GetCoolDown().GetCoolDownPeriod())
+				err := t.deleteQueue.Push(eni)
+				t.log.Error(err, "error pushing element in queue that was failed to deleted")
 				continue
 			}
-			t.log.V(1).Info("deleted eni successfully", "eni", eni, "deletion time", time.Now(),
-				"pushed to queue time", eni.deletionTimeStamp)
 		} else {
 			// Since the current item is not cooled down so the items added after it would not be cooled down either
-			t.PushENIsToFrontOfDeleteQueue(nil, []*ENIDetails{eni})
-			return
+			err := t.deleteQueue.Push(eni)
+			if err != nil {
+				t.log.Error(err, "error pushing element in queue that was not cooled down")
+			}
 		}
 	}
 }
@@ -606,14 +613,36 @@ func (t *trunkENI) getBranchInterfacesUsedByPod(pod *v1.Pod) (eniDetails []*ENID
 
 // pushENIToDeleteQueue pushes an ENI to a delete queue
 func (t *trunkENI) pushENIToDeleteQueue(eni *ENIDetails) {
-	t.lock.Lock()
-	defer t.lock.Unlock()
+	if eni == nil {
+		fmt.Println("cannot push nil ENI to delete queue")
+		return
+	}
 
-	t.deleteQueue.Enqueue(eni)
+	// Set deletion timestamp if not already set
+	if eni.deletionTimeStamp.IsZero() {
+		eni.deletionTimeStamp = time.Now()
+	}
+
+	// Calculate cooldown period once to avoid multiple calls
+	cooldownPeriod := cooldown.GetCoolDown().GetCoolDownPeriod()
+	nextProcessingTime := eni.deletionTimeStamp.Add(cooldownPeriod)
+
+	// Update next due time if not set or if it's earlier than the calculated next processing time
+	if eni.nextDueTime.IsZero() || eni.nextDueTime.Before(nextProcessingTime) {
+		eni.nextDueTime = nextProcessingTime
+	}
+
+	// Push to delete queue and handle errors
+	if err := t.deleteQueue.Push(eni); err != nil {
+		t.log.Error(err, "failed to push ENI to delete queue",
+			"eniID", eni.ID,
+			"deletionTimestamp", eni.deletionTimeStamp,
+			"nextDueTime", eni.nextDueTime)
+	}
 }
 
 // pushENIsToFrontOfDeleteQueue pushes the ENI list to the front of the delete queue
-func (t *trunkENI) PushENIsToFrontOfDeleteQueue(pod *v1.Pod, eniList []*ENIDetails) {
+func (t *trunkENI) PushENIsToDeleteQueue(pod *v1.Pod, eniList []*ENIDetails) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
@@ -625,7 +654,7 @@ func (t *trunkENI) PushENIsToFrontOfDeleteQueue(pod *v1.Pod, eniList []*ENIDetai
 		t.log.Info("pushing ENIs to delete queue", "ENIs", eniList)
 	}
 	for i := len(eniList) - 1; i >= 0; i-- {
-		t.deleteQueue.EnqueueFront(eniList[i])
+		t.pushENIToDeleteQueue(eniList[i])
 	}
 }
 
@@ -707,7 +736,7 @@ func (t *trunkENI) canCreateMore() bool {
 		usedBranches += len(branches)
 	}
 
-	if usedBranches+t.deleteQueue.Size() < vpc.Limits[t.instance.Type()].BranchInterface {
+	if usedBranches+t.deleteQueue.Len() < vpc.Limits[t.instance.Type()].BranchInterface {
 		return true
 	}
 	return false
@@ -729,26 +758,23 @@ func (t *trunkENI) Introspect() IntrospectResponse {
 		}
 		response.PodToBranchENI[uid] = eniDetails
 	}
-	for _, eni := range t.deleteQueue.Elements() {
-		response.DeleteQueue = append(response.DeleteQueue, *eni)
+	for _, eni := range t.deleteQueue.Items() {
+		response.DeleteQueue = append(response.DeleteQueue, eni)
 	}
 	return response
 }
 
-func (t *trunkENI) GetLeastCoolDownTime() (time.Duration, error) {
-	eniDetails, err := t.deleteQueue.First()
-	if err != nil {
-		return 0, err
+func (t *trunkENI) GetLeastRemainingCoolDownTime() (time.Duration, error) {
+	eniDetails, ok := t.deleteQueue.Peek()
+	if !ok {
+		t.log.Error(nil, "failed to peek into queue")
+		return 0, errors.New("failed to peek into queue")
 	}
-
-	timeSpent := time.Since(eniDetails.deletionTimeStamp)
-	cooldownPeriod := cooldown.GetCoolDown().GetCoolDownPeriod()
-
-	remaining := cooldownPeriod - timeSpent
+	remaining := time.Until(eniDetails.nextDueTime)
 	if remaining < 0 {
 		remaining = 0
 	}
 
-	jitter := time.Duration(rand.Intn(100)) * time.Millisecond
-	return remaining + jitter, err
+	//jitter := time.Duration(rand.Intn(100)) * time.Millisecond
+	return remaining.Round(time.Millisecond) /*+ jitter*/, nil
 }
