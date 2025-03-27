@@ -16,6 +16,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -128,7 +129,12 @@ func (w *worker) SetWorkerFunc(workerFunc func(interface{}) (ctrl.Result, error)
 func (w *worker) SubmitJob(job interface{}) {
 	// in theory, only health check endpoint should send a nil job to test periodically
 	if job == nil {
+		start := time.Now()
 		queueLen := w.queue.Len()
+		duration := time.Since(start)
+		if duration > 5*time.Second {
+			fmt.Printf("!!!! queue took too long greater than 5 seconds. resource %s,", w.resourceName)
+		}
 		w.Log.V(1).Info("For informational / health check purpose only to check worker queue availability", "WorkerQueueLen", queueLen)
 		return
 	}
