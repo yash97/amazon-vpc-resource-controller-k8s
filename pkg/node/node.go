@@ -237,8 +237,8 @@ func (n *node) IsReady() bool {
 
 // IsManaged returns true if the node is managed by the controller
 func (n *node) IsManaged() bool {
-	n.lock.RLock()
-	defer n.lock.RUnlock()
+	// n.lock.RLock()
+	// defer n.lock.RUnlock()
 
 	return n.managed
 }

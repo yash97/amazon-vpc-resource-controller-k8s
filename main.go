@@ -201,7 +201,7 @@ func main() {
 		"GitCommit", version.GitCommit,
 		"BuildDate", version.BuildDate,
 	)
-
+	fmt.Println("this is health check image wihout lock of is cache managed")
 	if clusterName == "" {
 		setupLog.Error(fmt.Errorf("cluster-name is a required parameter"), "unable to start the controller")
 		os.Exit(1)

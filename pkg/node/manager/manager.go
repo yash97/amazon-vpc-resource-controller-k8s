@@ -167,10 +167,10 @@ func (m *manager) GetNode(nodeName string) (node node.Node, found bool) {
 // AddNode adds the managed and un-managed nodes to the in memory data store, the
 // user of node can verify if the node is managed before performing any operations
 func (m *manager) AddNode(nodeName string) error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
 
 	k8sNode, err := m.wrapper.K8sAPI.GetNode(nodeName)
+	m.lock.Lock()
+	defer m.lock.Unlock()
 	if err != nil {
 		return fmt.Errorf("failed to add node %s, doesn't exist in cache anymore", nodeName)
 	}
@@ -244,10 +244,10 @@ func (m *manager) CreateCNINodeIfNotExisting(node *v1.Node) error {
 // and now is not required to be managed, it's resources are de-initialized. Finally,
 // if there is no toggling, the resources are updated
 func (m *manager) UpdateNode(nodeName string) error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
 
 	k8sNode, err := m.wrapper.K8sAPI.GetNode(nodeName)
+	m.lock.Lock()
+	defer m.lock.Unlock()
 	if err != nil {
 		return fmt.Errorf("failed to update node %s, doesn't exist in cache anymore", nodeName)
 	}
@@ -569,23 +569,76 @@ func (m *manager) removeNodeSafe(nodeName string) {
 }
 
 func (m *manager) check() healthz.Checker {
-	// instead of using SimplePing, testing the node cache from manager makes the test more accurate
 	return func(req *http.Request) error {
-		err := rcHealthz.PingWithTimeout(func(c chan<- error) {
-			randomName := uuid.New().String()
-			_, found := m.GetNode(randomName)
-			m.Log.V(1).Info("health check tested ping GetNode to check on datastore cache in node manager successfully", "TesedNodeName", randomName, "NodeFound", found)
-			if m.SkipHealthCheck() {
-				m.Log.Info("due to EC2 error, node manager skips node worker queue health check for now")
-			} else {
-				var ping interface{}
-				m.worker.SubmitJob(ping)
-				m.Log.V(1).Info("health check tested ping SubmitJob with a nil job to check on worker queue in node manager successfully")
-			}
-			c <- nil
-		}, m.Log)
+		m.Log.Info("Starting health check for node manager")
 
-		return err
+		return rcHealthz.PingWithTimeout(func(c chan<- error) {
+			var healthCheckErr error
+
+			// GetNode check
+			randomName := uuid.New().String()
+			startGet := time.Now()
+			func() {
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					_, found := m.GetNode(randomName)
+					m.Log.V(1).Info("GetNode check completed",
+						"TestedNodeName", randomName,
+						"NodeFound", found)
+				}()
+
+				select {
+				case <-done:
+					duration := time.Since(startGet)
+					if duration > 2*time.Second {
+						m.Log.Error(nil, "GetNode took too long", "duration", duration)
+						healthCheckErr = fmt.Errorf("GetNode took %v, which exceeds 2s limit", duration)
+					} else {
+						m.Log.Info("GetNode completed within time limit", "duration", duration)
+					}
+				case <-time.After(5 * time.Second):
+					m.Log.Error(nil, "GetNode timed out", "timeout", "5s")
+					healthCheckErr = fmt.Errorf("GetNode timed out after 5s")
+				}
+			}()
+
+			// SubmitJob check
+			if !m.SkipHealthCheck() {
+				startSubmit := time.Now()
+				func() {
+					done := make(chan struct{})
+					go func() {
+						defer close(done)
+						var healthCheckJob interface{} // Define this type appropriately
+						m.worker.SubmitJob(healthCheckJob)
+						m.Log.V(1).Info("SubmitJob check completed")
+					}()
+
+					select {
+					case <-done:
+						duration := time.Since(startSubmit)
+						if duration > 2*time.Second {
+							m.Log.Error(nil, "SubmitJob took too long", "duration", duration)
+							if healthCheckErr == nil {
+								healthCheckErr = fmt.Errorf("SubmitJob took %v, which exceeds 2s limit", duration)
+							}
+						} else {
+							m.Log.V(1).Info("SubmitJob completed within time limit", "duration", duration)
+						}
+					case <-time.After(5 * time.Second):
+						m.Log.Error(nil, "SubmitJob timed out", "timeout", "5s")
+						if healthCheckErr == nil {
+							healthCheckErr = fmt.Errorf("SubmitJob timed out after 5s")
+						}
+					}
+				}()
+			} else {
+				m.Log.Info("Skipping node worker queue health check due to EC2 error")
+			}
+
+			c <- healthCheckErr
+		}, m.Log)
 	}
 }
 

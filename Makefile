@@ -10,7 +10,7 @@ GIT_VERSION=$(shell git describe --tags --always)
 MAKEFILE_PATH = $(dir $(realpath -s $(firstword $(MAKEFILE_LIST))))
 
 VERSION ?= $(GIT_VERSION)
-IMAGE ?= public.ecr.aws/g9h4k6l2/vpc-rc:queue_len
+IMAGE ?= public.ecr.aws/g9h4k6l2/vpc-rc:health_check_duration-2
 BASE_IMAGE ?= public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-nonroot:latest.2
 GOLANG_VERSION ?= $(shell cat .go-version)
 BUILD_IMAGE ?= public.ecr.aws/docker/library/golang:$(GOLANG_VERSION)
