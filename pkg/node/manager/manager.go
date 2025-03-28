@@ -168,8 +168,6 @@ func (m *manager) GetNode(nodeName string) (node node.Node, found bool) {
 // user of node can verify if the node is managed before performing any operations
 func (m *manager) AddNode(nodeName string) error {
 	m.lock.Lock()
-	defer m.lock.Unlock()
-
 	k8sNode, err := m.wrapper.K8sAPI.GetNode(nodeName)
 	if err != nil {
 		return fmt.Errorf("failed to add node %s, doesn't exist in cache anymore", nodeName)
@@ -185,12 +183,15 @@ func (m *manager) AddNode(nodeName string) error {
 		log.Info("node is already processed, not processing add event again")
 		return nil
 	}
+	m.lock.Unlock()
 
 	if err = m.CreateCNINodeIfNotExisting(k8sNode); err != nil {
 		m.Log.Error(err, "Failed to create CNINode for k8sNode", "NodeName", k8sNode.Name)
 		return err
 	}
 
+	m.lock.Lock()
+	defer m.lock.Unlock()
 	shouldManage, err := m.isSelectedForManagement(k8sNode)
 	if err != nil {
 		return err
@@ -216,7 +217,7 @@ func (m *manager) AddNode(nodeName string) error {
 		return nil
 	}
 
-	m.worker.SubmitJob(AsyncOperationJob{
+	go m.worker.SubmitJob(AsyncOperationJob{
 		op:       op,
 		node:     newNode,
 		nodeName: nodeName,
@@ -301,7 +302,7 @@ func (m *manager) UpdateNode(nodeName string) error {
 		return nil
 	}
 
-	m.worker.SubmitJob(AsyncOperationJob{
+	go m.worker.SubmitJob(AsyncOperationJob{
 		op:       op,
 		node:     cachedNode,
 		nodeName: nodeName,
@@ -347,7 +348,7 @@ func (m *manager) DeleteNode(nodeName string) error {
 		return nil
 	}
 
-	m.worker.SubmitJob(AsyncOperationJob{
+	go m.worker.SubmitJob(AsyncOperationJob{
 		op:       Delete,
 		node:     cachedNode,
 		nodeName: nodeName,
